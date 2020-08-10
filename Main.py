@@ -8,6 +8,7 @@ This is a temporary script file.
 import requests
 import csv
 import pandas as pd
+import numpy as np
 import urllib.parse
 import os
 from bs4 import BeautifulSoup
@@ -71,7 +72,26 @@ def first_stage_detection_data_clean(detection_data):
     pd_time = detection_data_cleaned['time'].str.replace('/','_')
     pd_time = pd_time.str.replace(' ','_')
     detection_data_cleaned['time'] = pd_time.str[0:13].str.replace(':', '')
-    return detection_data_cleaned
+    flag_longitude_exist = ~detection_data_cleaned['longitude'].isna()
+    detection_data_GPSExist = detection_data_cleaned.loc[flag_longitude_exist]
+    flag_latitude_exist = ~detection_data_GPSExist['latitude'].isna()
+    detection_data_GPSExist = detection_data_GPSExist.loc[flag_latitude_exist]
+    
+    
+    return detection_data_GPSExist
+
+def second_stage_detection_data_clean(detection_data, station_name): # remove the data far from the object station
+    station_info = get_station_info(station_name)
+    station_longtitude = float(station_info[3])
+    station_latitude = float(station_info[4])
+    pd_longitude = detection_data['longitude']
+    pd_latitude = detection_data['latitude']
+    diff_longtitude = np.array(pd_latitude - station_longtitude)
+    diff_latitude = np.array(pd_longitude - station_latitude)
+    diff_GPS = np.power(np.power(diff_longtitude, 2)+np.power(diff_latitude, 2), 0.5)
+    detection_data['distance'] = pd.DataFrame(diff_GPS)
+    
+    
                     
 def main():
     start_date = datetime(2019, 10, 1)
@@ -89,6 +109,7 @@ def main():
     
     detection_data = pd.read_csv(detection_filename, encoding = 'ANSI') # the detection file is encoded in "ANSI"
     detection_data_first_cleaned = first_stage_detection_data_clean(detection_data)
+    detection_data_second_cleaned = second_stage_detection_data_clean(detection_data_first_cleaned, station_name)
     
     print('Finished')
     
