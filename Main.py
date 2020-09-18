@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 Spyder Editor
-
 This is a temporary script file.
 """
 
@@ -90,7 +89,9 @@ def second_stage_detection_data_clean(detection_data, station_name): # remove th
     diff_latitude = np.array(pd_longitude - station_latitude)
     diff_GPS = np.power(np.power(diff_longtitude, 2)+np.power(diff_latitude, 2), 0.5)
     detection_data['distance'] = pd.DataFrame(diff_GPS)
+    detection_data = detection_data.loc[detection_data['distance'] < 0.1]
     
+    return detection_data
     
                     
 def main():
@@ -110,6 +111,8 @@ def main():
     detection_data = pd.read_csv(detection_filename, encoding = 'ANSI') # the detection file is encoded in "ANSI"
     detection_data_first_cleaned = first_stage_detection_data_clean(detection_data)
     detection_data_second_cleaned = second_stage_detection_data_clean(detection_data_first_cleaned, station_name)
+    detection_data_combined_climate = combine_data_climate_detection(detection_data_second_cleaned, climate_data_first_cleaned)
+    
     
     print('Finished')
     
