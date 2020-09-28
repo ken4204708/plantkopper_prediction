@@ -12,6 +12,8 @@ import urllib.parse
 import os
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection  import train_test_split
 
 
 def daterange(start_date, end_date):
@@ -70,6 +72,7 @@ def first_stage_detection_data_clean(detection_data):
     detection_data_cleaned = detection_data.dropna(how = 'all') # remove the nan part
     pd_time = detection_data_cleaned['time'].str.replace('/','_')
     pd_time = pd_time.str.replace(' ','_')
+    pd_time = pd_time.apply(lambda x: x[:8] + '0' + x[8:] if x[9]=='_' else x) # replace the date number if the date is only one digit
     detection_data_cleaned['time'] = pd_time.str[0:13].str.replace(':', '')
     flag_longitude_exist = ~detection_data_cleaned['longitude'].isna()
     detection_data_GPSExist = detection_data_cleaned.loc[flag_longitude_exist]
@@ -92,7 +95,19 @@ def second_stage_detection_data_clean(detection_data, station_name): # remove th
     detection_data = detection_data.loc[detection_data['distance'] < 0.1]
     
     return detection_data
+
+def combine_data_climate_detection(detection_data_second_cleaned, climate_data_first_cleaned):
+    df_temp = detection_data_second_cleaned.merge(climate_data_first_cleaned, on=['time'])
+    print('Processing...')
     
+def elastic_net_training():
+    stdsc = StandardScaler()
+    X,y = final_data_20.iloc[:,0:9].values,final_data_20.iloc[:,-1].values
+    X_train,X_test,y_train,y_test=\
+    train_test_split(X,y,test_size=0.2,random_state=0)
+    #X_train_std = stdsc.fit_transform(X_train)
+    #X_test_std = stdsc.fit_transform(X_test)
+
                     
 def main():
     start_date = datetime(2019, 10, 1)
