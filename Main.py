@@ -10,10 +10,14 @@ import pandas as pd
 import numpy as np
 import urllib.parse
 import os
+import matplotlib.pyplot as plt
+import math
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection  import train_test_split
+from sklearn.linear_model import ElasticNet
+from sklearn.metrics import r2_score
 
 
 def daterange(start_date, end_date):
@@ -66,6 +70,22 @@ def download_climate_data(station_name, start_date, end_date, climate_file_name)
             date_count = date_count + 1
 def first_stage_climate_data_clean(climate_data):
     climate_data_cleaned = climate_data.dropna(axis = 1)
+    climate_data_cleaned = climate_data_cleaned.rename(columns = {"觀測時間(hour)": "time", 
+                                           "測站氣壓(hPa)": "air_pressure", 
+                                           "氣溫(℃)": "temperature", 
+                                           "相對溼度(%)": "humidity", 
+                                           "風速(m/s)": "wind_speed", 
+                                           "風向(360degree)": "wind_direction", 
+                                           "降水量(mm)\t": "rainfall"})
+    for column in climate_data_cleaned.columns:
+        df_temp = climate_data_cleaned[column].iloc[1:].reset_index()
+        df_temp = df_temp[column]
+        if (column != 'time'):
+            df_temp = df_temp.replace('/', np.NaN)
+            df_temp = df_temp.replace('X', np.NaN)
+            df_temp = df_temp.astype(float)
+            df_temp = df_temp.interpolate(method = 'nearest')
+        climate_data_cleaned[column] = df_temp
     return climate_data_cleaned
 
 def first_stage_detection_data_clean(detection_data):
@@ -78,8 +98,6 @@ def first_stage_detection_data_clean(detection_data):
     detection_data_GPSExist = detection_data_cleaned.loc[flag_longitude_exist]
     flag_latitude_exist = ~detection_data_GPSExist['latitude'].isna()
     detection_data_GPSExist = detection_data_GPSExist.loc[flag_latitude_exist]
-    
-    
     return detection_data_GPSExist
 
 def second_stage_detection_data_clean(detection_data, station_name): # remove the data far from the object station
@@ -93,21 +111,51 @@ def second_stage_detection_data_clean(detection_data, station_name): # remove th
     diff_GPS = np.power(np.power(diff_longtitude, 2)+np.power(diff_latitude, 2), 0.5)
     detection_data['distance'] = pd.DataFrame(diff_GPS)
     detection_data = detection_data.loc[detection_data['distance'] < 0.1]
-    
-    return detection_data
+    detection_data_selected = detection_data.loc[:, ['time', 'amount']]
+    detection_data_avg = detection_data_selected.groupby('time').mean()
+    return detection_data_avg
 
-def combine_data_climate_detection(detection_data_second_cleaned, climate_data_first_cleaned):
-    df_temp = detection_data_second_cleaned.merge(climate_data_first_cleaned, on=['time'])
-    print('Processing...')
+def combine_data_climate_detection(detection_data_second_cleaned, climate_data_first_cleaned, predict_date):
+    df_temp = climate_data_first_cleaned.merge(detection_data_second_cleaned, on=['time'], how='left')    
+    df_amount_interpolated = df_temp['amount'].interpolate(method = 'quadratic')
+    df_amount_interpolated = df_amount_interpolated.where(df_amount_interpolated > 0, 0) # Replace the negative value to zero
+    df_temp['amount'] = df_amount_interpolated
+    df_temp = df_temp.dropna()
+    df_temp['predict_amount'] = df_temp['amount'].iloc[predict_date:].reset_index()['amount']
+    df_temp = df_temp.dropna()
+    return df_temp
     
-def elastic_net_training():
+def data_seperation(data):
     stdsc = StandardScaler()
-    X,y = final_data_20.iloc[:,0:9].values,final_data_20.iloc[:,-1].values
-    X_train,X_test,y_train,y_test=\
-    train_test_split(X,y,test_size=0.2,random_state=0)
+    X,y = data.iloc[:,1:-2].values,data.iloc[:,-1].values
+    X_train,X_test,y_train,y_test=train_test_split(X,y,test_size=0.2,random_state=0)
     #X_train_std = stdsc.fit_transform(X_train)
     #X_test_std = stdsc.fit_transform(X_test)
+    return X_train, y_train, X_test, y_test
 
+
+def Plot_feature_weight(Data, X_train, y_train):
+    fig = plt.figure(1, figsize=(12, 10))
+    ax = plt.subplot(111)
+    colors = ['blue','green','red','cyan','yellow','black','pink','lightgreen','lightblue','orange']
+    weights, params = [] ,[]
+    for c in np.arange(-7,3,0.1):
+        enet = ElasticNet(alpha=math.pow(10,c), l1_ratio=1)
+        enet.fit(X_train,y_train)
+        weights.append(enet.coef_[:])
+        params.append(math.pow(10,c))
+    weights = np.array(weights)
+    
+    for column,color in zip(range(weights.shape[1]), colors):
+        plt.plot(params,weights[:,column],label=Data.columns[column + 1],color=color)
+    plt.axhline(0,color='black',linestyle='--',linewidth=3)
+    plt.xlim([math.pow(10,(3)),math.pow(10,(-7))])
+    plt.ylabel('weight coefficient')
+    plt.xlabel('Alpha')
+    plt.xscale('log')
+    plt.legend(loc='upper left')
+    ax.legend(loc='upper center',bbox_to_anchor=(0.14,1),ncol=1,fancybox=True)
+    plt.show()
                     
 def main():
     start_date = datetime(2019, 10, 1)
@@ -115,18 +163,41 @@ def main():
     station_name = "芬園"
     detection_filename = 'database.csv'
     
-    
     climate_filename = 'climate_data_' + start_date.strftime("%Y_%m_%d") + '_' + end_date.strftime("%Y_%m_%d") + '.csv'
     if not os.path.exists(climate_filename):
         download_climate_data(station_name, start_date, end_date, climate_filename)
     climate_data = pd.read_csv(climate_filename)
     climate_data_first_cleaned = first_stage_climate_data_clean(climate_data)
     
-    
     detection_data = pd.read_csv(detection_filename, encoding = 'ANSI') # the detection file is encoded in "ANSI"
     detection_data_first_cleaned = first_stage_detection_data_clean(detection_data)
     detection_data_second_cleaned = second_stage_detection_data_clean(detection_data_first_cleaned, station_name)
-    detection_data_combined_climate = combine_data_climate_detection(detection_data_second_cleaned, climate_data_first_cleaned)
+    detection_data_combined_climate = combine_data_climate_detection(detection_data_second_cleaned, climate_data_first_cleaned, 1)    
+    X_train, y_train, X_test, y_test = data_seperation(detection_data_combined_climate)
+    
+    for a in np.arange(-7,3,1):
+        enet = ElasticNet(alpha=math.pow(10,a), l1_ratio=0.5)
+        y_pred_enet = enet.fit(X_train, y_train).predict(X_test)
+        r2_score_enet = r2_score(y_test, y_pred_enet)
+        print('alpha=',a)
+        print(enet.coef_) 
+        print("r^2 on test data : %f" % r2_score_enet)
+    
+    Plot_feature_weight(detection_data_combined_climate, X_train, y_train)
+    data = detection_data_combined_climate.iloc[:, [0,1,2,3,4,-2,-1]]
+    
+    X_train, y_train, X_test, y_test = data_seperation(data)
+    
+    for a in np.arange(-7,3,1):
+        enet = ElasticNet(alpha=math.pow(10,a), l1_ratio=0.5)
+        y_pred_enet = enet.fit(X_train, y_train).predict(X_test)
+        r2_score_enet = r2_score(y_test, y_pred_enet)
+        print('alpha=',a)
+        print(enet.coef_) 
+        print("r^2 on test data : %f" % r2_score_enet)
+    print(data.columns)
+    print(X_train.shape)
+    
     
     
     print('Finished')
