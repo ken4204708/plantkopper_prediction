@@ -12,6 +12,8 @@ import urllib.parse
 import os
 import matplotlib.pyplot as plt
 import math
+import pickle
+import argparse
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from sklearn.preprocessing import StandardScaler
@@ -88,6 +90,13 @@ def first_stage_climate_data_clean(climate_data):
         climate_data_cleaned[column] = df_temp
     return climate_data_cleaned
 
+def get_time_from_data(pd_time):
+    pd_time = pd_time.str.replace('/','_')
+    pd_time = pd_time.str.replace(' ','_')
+    pd_time = pd_time.apply(lambda x: x[:8] + '0' + x[8:] if x[9]=='_' else x) # replace the date number if the date is only one digit    
+    time = pd_time.str[0:13].str.replace(':', '')
+    return time
+
 def first_stage_detection_data_clean(detection_data):
     detection_data_cleaned = detection_data.dropna(how = 'all') # remove the nan part
     pd_time = detection_data_cleaned['time'].str.replace('/','_')
@@ -127,7 +136,7 @@ def combine_data_climate_detection(detection_data_second_cleaned, climate_data_f
     
 def data_seperation(data):
     stdsc = StandardScaler()
-    X,y = data.iloc[:,1:-2].values,data.iloc[:,-1].values
+    X,y = data.iloc[:,1:-1].values,data.iloc[:,-1].values
     X_train,X_test,y_train,y_test=train_test_split(X,y,test_size=0.2,random_state=0)
     #X_train_std = stdsc.fit_transform(X_train)
     #X_test_std = stdsc.fit_transform(X_test)
@@ -156,51 +165,103 @@ def Plot_feature_weight(Data, X_train, y_train):
     plt.legend(loc='upper left')
     ax.legend(loc='upper center',bbox_to_anchor=(0.14,1),ncol=1,fancybox=True)
     plt.show()
+
+def data_preprocessing(data, location):
+    start_date = get_time_from_data(data.time)
+    start_date = datetime.fromisoformat(start_date.iloc[0].replace('_', '-')[0:10])
+    end_date = start_date + timedelta(1)
+    climate_filename = 'climate_data_' + start_date.strftime("%Y_%m_%d") + '_' + end_date.strftime("%Y_%m_%d") + '.csv'
+    if not os.path.exists(climate_filename):
+        download_climate_data(station_name, start_date, end_date, climate_filename)
+    climate_data = pd.read_csv(climate_filename) # 24 hours climate data
+    climate_data_first_cleaned = first_stage_climate_data_clean(climate_data)
+    detection_data_first_cleaned = first_stage_detection_data_clean(data)
+    detection_data_second_cleaned = detection_data_first_cleaned.loc[:, ['time', 'amount']]
+    merge_data = detection_data_second_cleaned.merge(climate_data_first_cleaned, on=['time'], how='left')
+    cols = merge_data.columns.tolist()
+    new_cols = cols[:1] + cols[2:6] + cols[1:2]
+    merge_data = merge_data[new_cols].iloc[:, 1:].values
+    return merge_data
+
                     
-def main():
-    start_date = datetime(2019, 10, 1)
-    end_date = datetime(2019, 12, 1)
-    station_name = "芬園"
-    detection_filename = 'database.csv'
+def main(station_name, detection_filename):    
+    detection_data = pd.read_csv(detection_filename, encoding = 'ANSI') # the detection file is encoded in "ANSI"
+    detection_data_first_cleaned = first_stage_detection_data_clean(detection_data)
+    detection_data_second_cleaned = second_stage_detection_data_clean(detection_data_first_cleaned, station_name)
     
+    start_date = datetime.fromisoformat(min(detection_data_second_cleaned.index)[0:10].replace('_', '-'))
+    end_date = datetime.fromisoformat(max(detection_data_second_cleaned.index)[0:10].replace('_', '-'))
     climate_filename = 'climate_data_' + start_date.strftime("%Y_%m_%d") + '_' + end_date.strftime("%Y_%m_%d") + '.csv'
     if not os.path.exists(climate_filename):
         download_climate_data(station_name, start_date, end_date, climate_filename)
     climate_data = pd.read_csv(climate_filename)
     climate_data_first_cleaned = first_stage_climate_data_clean(climate_data)
     
-    detection_data = pd.read_csv(detection_filename, encoding = 'ANSI') # the detection file is encoded in "ANSI"
-    detection_data_first_cleaned = first_stage_detection_data_clean(detection_data)
-    detection_data_second_cleaned = second_stage_detection_data_clean(detection_data_first_cleaned, station_name)
-    detection_data_combined_climate = combine_data_climate_detection(detection_data_second_cleaned, climate_data_first_cleaned, 1)    
-    X_train, y_train, X_test, y_test = data_seperation(detection_data_combined_climate)
+    for i in range(1, 8):
+        model_filename = 'ElasticNet_' + str(i) + '.pickle'
+        detection_data_combined_climate = combine_data_climate_detection(detection_data_second_cleaned, climate_data_first_cleaned, i)    
+        # X_train, y_train, X_test, y_test = data_seperation(detection_data_combined_climate)
+        
+        # for a in np.arange(-7,3,1):
+        #     enet = ElasticNet(alpha=math.pow(10,a), l1_ratio=0.5)
+        #     y_pred_enet = enet.fit(X_train, y_train).predict(X_test)
+        #     r2_score_enet = r2_score(y_test, y_pred_enet)
+        #     print('alpha=',a)
+        #     print(enet.coef_) 
+        #     print("r^2 on test data : %f" % r2_score_enet)
+        
+        # Plot_feature_weight(detection_data_combined_climate, X_train, y_train)
+        data = detection_data_combined_climate.iloc[:, [0,1,2,3,4,-2,-1]]
+        
+        X_train, y_train, X_test, y_test = data_seperation(data)
+        
+        r2_score_enet_list = []
+        non_zero_weights_list = []
+        net_list = []
+        for a in np.arange(-7,3,1):
+            enet = ElasticNet(alpha=math.pow(10,a), l1_ratio=0.5)
+            y_pred_enet = enet.fit(X_train, y_train).predict(X_test)
+            r2_score_enet = r2_score(y_test, y_pred_enet)
+            r2_score_enet_list.append(r2_score_enet)
+            num_zero_weights = sum([abs(enet.coef_ - 0.0001) < 1e-3][0])
+            non_zero_weights_list.append(num_zero_weights)
+            net_list.append(enet)
+            print('alpha=',a)
+            print(enet.coef_) 
+            print("r^2 on test data : %f" % r2_score_enet)
+        performance_value = [x + 1e-2*y for x, y in zip(r2_score_enet_list, non_zero_weights_list)]
+        index_selected_model = performance_value.index(max(performance_value))
+        with open(model_filename, 'wb') as f:
+            pickle.dump(net_list[index_selected_model], f)
+    print('Training process finished')
     
-    for a in np.arange(-7,3,1):
-        enet = ElasticNet(alpha=math.pow(10,a), l1_ratio=0.5)
-        y_pred_enet = enet.fit(X_train, y_train).predict(X_test)
-        r2_score_enet = r2_score(y_test, y_pred_enet)
-        print('alpha=',a)
-        print(enet.coef_) 
-        print("r^2 on test data : %f" % r2_score_enet)
-    
-    Plot_feature_weight(detection_data_combined_climate, X_train, y_train)
-    data = detection_data_combined_climate.iloc[:, [0,1,2,3,4,-2,-1]]
-    
-    X_train, y_train, X_test, y_test = data_seperation(data)
-    
-    for a in np.arange(-7,3,1):
-        enet = ElasticNet(alpha=math.pow(10,a), l1_ratio=0.5)
-        y_pred_enet = enet.fit(X_train, y_train).predict(X_test)
-        r2_score_enet = r2_score(y_test, y_pred_enet)
-        print('alpha=',a)
-        print(enet.coef_) 
-        print("r^2 on test data : %f" % r2_score_enet)
-    print(data.columns)
-    print(X_train.shape)
-    
-    
-    
-    print('Finished')
+def run(location, data_filename, model_filename):
+    data =pd.read_csv(data_filename)
+    x_test = data_preprocessing(data, location)
+    with open(model_filename, 'rb') as f:
+        enet = pickle.load(f)
+    predicted_amount = enet.predict(x_test)[0]
+    return predicted_amount
     
 if __name__ == "__main__":
-    main()
+    
+    # Python Parser
+    parser = argparse.ArgumentParser(description="")
+    parser.add_argument("-mode", help="training mode or inference mode", type=str)
+    parser.add_argument("-station_name", help="name of station", type=str)
+    parser.add_argument("-data_filename", help="file name of collected data from server", type=str)
+    parser.add_argument("-model_filename", help="file name of the saved model", type=str)
+    args = parser.parse_args()
+    flag_mode = args.mode
+    station_name = args.station_name
+    data_filename = args.data_filename
+    model_filename = args.model_filename
+    
+    if flag_mode == 'inference':
+        # data_filename = 'test_samples.csv'
+        # model_filename = 'ElasticNet_1.pickle'
+        predicted_value = run(station_name, data_filename, model_filename)
+        print('The predicted amount is %s' %(predicted_value))
+    else:
+        data_filename = 'database.csv'
+        main(station_name, data_filename)
