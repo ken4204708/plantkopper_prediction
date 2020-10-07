@@ -235,7 +235,7 @@ def run(location, data_filename, model_filename):
 if __name__ == "__main__":
     
     # Python Parser
-    parser = argparse.ArgumentParser(description="")
+    parser = argparse.ArgumentParser(description="Plantkopper prediction tool v1.0")
     parser.add_argument("-mode", help="training mode or inference mode", type=str)
     parser.add_argument("-station_name", help="name of station", type=str)
     parser.add_argument("-data_filename", help="file name of collected data from server", type=str)
