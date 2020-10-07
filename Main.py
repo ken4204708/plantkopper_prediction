@@ -200,17 +200,6 @@ def main(station_name, detection_filename):
     for i in range(1, 8):
         model_filename = 'ElasticNet_' + str(i) + '.pickle'
         detection_data_combined_climate = combine_data_climate_detection(detection_data_second_cleaned, climate_data_first_cleaned, i)    
-        # X_train, y_train, X_test, y_test = data_seperation(detection_data_combined_climate)
-        
-        # for a in np.arange(-7,3,1):
-        #     enet = ElasticNet(alpha=math.pow(10,a), l1_ratio=0.5)
-        #     y_pred_enet = enet.fit(X_train, y_train).predict(X_test)
-        #     r2_score_enet = r2_score(y_test, y_pred_enet)
-        #     print('alpha=',a)
-        #     print(enet.coef_) 
-        #     print("r^2 on test data : %f" % r2_score_enet)
-        
-        # Plot_feature_weight(detection_data_combined_climate, X_train, y_train)
         data = detection_data_combined_climate.iloc[:, [0,1,2,3,4,-2,-1]]
         
         X_train, y_train, X_test, y_test = data_seperation(data)
