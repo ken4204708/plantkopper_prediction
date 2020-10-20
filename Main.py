@@ -15,7 +15,7 @@ import math
 import pickle
 import argparse
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection  import train_test_split
 from sklearn.linear_model import ElasticNet
@@ -168,7 +168,8 @@ def Plot_feature_weight(Data, X_train, y_train):
 
 def data_preprocessing(data, location):
     start_date = get_time_from_data(data.time)
-    start_date = datetime.fromisoformat(start_date.iloc[0].replace('_', '-')[0:10])
+    start_date = pd.to_datetime(start_date.replace('_', '-')).iloc[0]
+    start_date = date(start_date.year, start_date.month, start_date.day)
     end_date = start_date + timedelta(1)
     climate_filename = 'climate_data_' + start_date.strftime("%Y_%m_%d") + '_' + end_date.strftime("%Y_%m_%d") + '.csv'
     if not os.path.exists(climate_filename):
@@ -245,6 +246,10 @@ if __name__ == "__main__":
     station_name = args.station_name
     data_filename = args.data_filename
     model_filename = args.model_filename
+    flag_mode = 'inference'
+    station_name = '芬園'
+    data_filename = 'test_samples.csv'
+    model_filename = 'ElasticNet_1.pickle'
     
     if flag_mode == 'inference':
         # data_filename = 'test_samples.csv'
